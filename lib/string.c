@@ -23,7 +23,7 @@
 #include <linux/bug.h>
 #include <linux/errno.h>
 #include <linux/slab.h>
-
+#include <linux/nls.h>
 #include <asm/unaligned.h>
 #include <asm/byteorder.h>
 #include <asm/word-at-a-time.h>
@@ -74,6 +74,17 @@ int strcasecmp(const char *s1, const char *s2)
 }
 EXPORT_SYMBOL(strcasecmp);
 #endif
+
+size_t wcslen(const wchar_t *s);
+size_t wcslen(const wchar_t *s)
+{
+ 	const wchar_t *sc;
+ 
+ 	for (sc = s; *sc != '\0'; ++sc)
+ 		/* nothing */;
+ 	return sc - s;
+}
+EXPORT_SYMBOL(wcslen);
 
 #ifndef __HAVE_ARCH_STRCPY
 /**

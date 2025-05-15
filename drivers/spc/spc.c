@@ -14,7 +14,7 @@ SYSCALL_DEFINE2(schedule_info,unsigned int,cmd,u64*,buf) {
     switch(cmd) {
         case CMD_START_RECORD:
             if (schedule_points == NULL) {
-                schedule_points = kmalloc(128*1024*sizeof(u64), GFP_KERNEL);
+                schedule_points = kmalloc(1024*sizeof(u64), GFP_KERNEL);
                 if (!schedule_points) {
                     return -ENOMEM;
                 }
@@ -50,7 +50,7 @@ SYSCALL_DEFINE2(schedule_info,unsigned int,cmd,u64*,buf) {
 
 void collect_info(void) {
     if(schedule_points==NULL)return;
-    if(record_count >= 128*1024) {
+    if(record_count >= 1024) {
         printk(KERN_INFO "Buffer full, too many schedule points\n");
         return;
     }

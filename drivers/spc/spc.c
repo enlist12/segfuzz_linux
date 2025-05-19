@@ -35,9 +35,10 @@ SYSCALL_DEFINE2(schedule_info,unsigned int,cmd,u64*,buf) {
             break;
         case CMD_GET_RECORD:
             if (schedule_points != NULL) {
-                copy_to_user(buf, &record_count, sizeof(u64));
-                copy_to_user(buf+1, schedule_points, record_count * sizeof(u64));
+                if (copy_to_user(buf, schedule_points, record_count * sizeof(u64)))
+                    return -EFAULT;
                 printk(KERN_INFO "Returning recorded data\n");
+                return record_count;
             } else {
                 printk(KERN_INFO "No data to return\n");
             }

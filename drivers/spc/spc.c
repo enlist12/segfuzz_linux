@@ -6,9 +6,27 @@
 #define CMD_START_RECORD 0x1
 #define CMD_STOP_RECORD  0x2
 #define CMD_GET_RECORD   0x3
+#define CMD_HINT_ADDR    0x4
+
 
 u64* schedule_points=NULL;
 u64 record_count = 0;
+
+void step_hint(void){
+    pr_info("I am used to be vm hint addr\n");
+    return;
+}
+
+// Server for hypercall
+void trampoline_exit(void){
+}
+
+// Server for hypercall
+void trampoline_entry(void){
+    while(1){
+        trampoline_exit();
+    }
+}
 
 SYSCALL_DEFINE2(schedule_info,unsigned int,cmd,u64*,buf) {
     switch(cmd) {
@@ -42,6 +60,9 @@ SYSCALL_DEFINE2(schedule_info,unsigned int,cmd,u64*,buf) {
             } else {
                 printk(KERN_INFO "No data to return\n");
             }
+            break;
+        case CMD_HINT_ADDR:
+            step_hint();
             break;
         default:
             return -EINVAL;

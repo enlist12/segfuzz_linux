@@ -7,18 +7,20 @@
 #define CMD_STOP_RECORD  0x2
 #define CMD_GET_RECORD   0x3
 #define CMD_HINT_ADDR    0x4
+#define MaxSyscallPointSize 200
 
 
 u64* schedule_points=NULL;
 u64 record_count = 0;
 
-void step_hint(void){
+__attribute__((__noinline__)) void step_hint(void){
     pr_info("I am used to be vm hint addr\n");
     return;
 }
 
 // Server for hypercall
-void trampoline_exit(void){
+__attribute__((__noinline__)) void trampoline_exit(void) {
+    asm volatile("nop");
 }
 
 // Server for hypercall
@@ -32,7 +34,7 @@ SYSCALL_DEFINE2(schedule_info,unsigned int,cmd,u64*,buf) {
     switch(cmd) {
         case CMD_START_RECORD:
             if (schedule_points == NULL) {
-                schedule_points = kmalloc(100*sizeof(u64), GFP_KERNEL);
+                schedule_points = kmalloc(MaxSyscallPointSize*sizeof(u64), GFP_KERNEL);
                 if (!schedule_points) {
                     return -ENOMEM;
                 }
@@ -72,7 +74,7 @@ SYSCALL_DEFINE2(schedule_info,unsigned int,cmd,u64*,buf) {
 
 void collect_info(void) {
     if(schedule_points==NULL)return;
-    if(record_count >= 100) {
+    if(record_count >= MaxSyscallPointSize) {
         printk(KERN_INFO "Buffer full, too many schedule points\n");
         return;
     }

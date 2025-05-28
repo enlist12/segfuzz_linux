@@ -7,6 +7,7 @@
 #define CMD_STOP_RECORD  0x2
 #define CMD_GET_RECORD   0x3
 #define CMD_HINT_ADDR    0x4
+#define CMD_TEST 0x5
 #define MaxSyscallPointSize 200
 
 
@@ -28,6 +29,12 @@ void trampoline_entry(void){
     while(1){
         trampoline_exit();
     }
+}
+
+void test_kasan(void){
+    u64*ptr=kmalloc(100*sizeof(u64),GFP_KERNEL);
+    kfree(ptr);
+    ptr[0]=0xdeadbeef;
 }
 
 SYSCALL_DEFINE2(schedule_info,unsigned int,cmd,u64*,buf) {
@@ -66,6 +73,8 @@ SYSCALL_DEFINE2(schedule_info,unsigned int,cmd,u64*,buf) {
         case CMD_HINT_ADDR:
             step_hint();
             break;
+        case CMD_TEST:
+            test_kasan();
         default:
             return -EINVAL;
     }
@@ -75,7 +84,8 @@ SYSCALL_DEFINE2(schedule_info,unsigned int,cmd,u64*,buf) {
 void collect_info(void) {
     if(schedule_points==NULL)return;
     if(record_count >= MaxSyscallPointSize) {
-        printk(KERN_INFO "Buffer full, too many schedule points\n");
+        //Somtimes, this message would full the ring buffer
+        //printk(KERN_INFO "Buffer full, too many schedule points\n");
         return;
     }
     void *return_address = __builtin_return_address(0);

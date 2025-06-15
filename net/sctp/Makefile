@@ -3,7 +3,7 @@
 # Makefile for SCTP support code.
 #
 
-KBUILD_CFLAGS += -fpass-plugin=/mnt/data/build/schedule.so
+KBUILD_CFLAGS += -fpass-plugin=/mnt/data/build/schedule.so  -fplugin=/mnt/data/build/schedule.so -mllvm -vul_obj=sctp_shared_key -fno-discard-value-names
 
 obj-$(CONFIG_IP_SCTP) += sctp.o
 obj-$(CONFIG_INET_SCTP_DIAG) += sctp_diag.o

@@ -8,15 +8,12 @@
 //#define CMD_GET_RECORD   0x3
 #define CMD_HINT_ADDR    0x4
 #define CMD_TEST 0x5
-#define CMD_GET_LOAD_RECORD 0x1234
-#define CMD_GET_STORE_RECORD 0X2345
+#define CMD_GET_RECORD 0x1234
 #define MaxSyscallPointSize 200
 
 
-u64* load_points=NULL;
-u64* store_points=NULL;
-u64 load_cnt = 0;
-u64 store_cnt = 0;
+u64* sche_points=NULL;
+u64 cnt=0;
 
 __attribute__((__noinline__)) void step_hint(void){
     pr_info("I am used to be vm hint addr\n");
@@ -44,47 +41,36 @@ void test_kasan(void){
 SYSCALL_DEFINE2(schedule_info,unsigned int,cmd,u64*,buf) {
     switch(cmd) {
         case CMD_START_RECORD:
-            if ((load_points == NULL) && (store_points == NULL)) {
-                load_points = kmalloc(MaxSyscallPointSize*sizeof(u64), GFP_KERNEL);
-                if (!load_points) {
+            if (sche_points == NULL) {
+                sche_points = kmalloc(2*MaxSyscallPointSize*sizeof(u64), GFP_KERNEL);
+                if (!sche_points) {
                     return -ENOMEM;
                 }
-                store_points = kmalloc(MaxSyscallPointSize*sizeof(u64), GFP_KERNEL);
                 printk(KERN_INFO "Recording started\n");
             } else {
                 printk(KERN_INFO "Already recording\n");
             }
             break;
         case CMD_STOP_RECORD:
-            if ((store_points != NULL) && (load_points != NULL)) {
-                kfree(store_points);
-                store_points = NULL;
-                store_cnt = 0;
-                kfree(load_points);
-                load_points = NULL;
-                load_cnt = 0;
+            if (sche_points != NULL) {
+                kfree(sche_points);
+                sche_points = NULL;
+                cnt = 0;
                 printk(KERN_INFO "Recording stopped\n");
             } else {
                 printk(KERN_INFO "Not recording\n");
             }
             break;
-        case CMD_GET_LOAD_RECORD:
-            if (load_points != NULL) {
-                if (copy_to_user(buf, load_points, load_cnt * sizeof(u64)))
+        case CMD_GET_RECORD:
+            if (sche_points != NULL) {
+                if (copy_to_user(buf, sche_points, 2*cnt * sizeof(u64)))
                     return -EFAULT;
                 printk(KERN_INFO "Returning recorded data\n");
-                return load_cnt;
+                return cnt;
             } else {
                 printk(KERN_INFO "No data to return\n");
             }
             break;
-        case CMD_GET_STORE_RECORD:
-            if (store_points != NULL) {
-                if (copy_to_user(buf, store_points, store_cnt * sizeof(u64)))
-                    return -EFAULT;
-                printk(KERN_INFO "Returning recorded data\n");
-                return store_cnt;
-            }
         case CMD_HINT_ADDR:
             step_hint();
             break;
@@ -98,29 +84,33 @@ SYSCALL_DEFINE2(schedule_info,unsigned int,cmd,u64*,buf) {
 
 
 void store_record(void){
-    if(store_points == NULL)return;
-    if(store_cnt >= MaxSyscallPointSize){
+    if(sche_points == NULL)return;
+    if(cnt >= MaxSyscallPointSize){
         return;
     }
     void *return_address = __builtin_return_address(0);
-    for(int i=0;i < store_cnt;i++){
-        if(return_address==store_points[i])return;
+    for(int i=0;i < 2*cnt;i++){
+        if(return_address==sche_points[i])return;
     }
-    store_points[store_cnt++] = (u64)return_address;
+    sche_points[2*cnt] = return_address;
+    sche_points[2*cnt+1] = 1;
+    cnt++;
     return;
 }
 
 
 void load_record(void){
-    if(load_points == NULL)return;
-    if(load_cnt >= MaxSyscallPointSize){
+    if(sche_points == NULL)return;
+    if(cnt >= MaxSyscallPointSize){
         return;
     }
     void *return_address = __builtin_return_address(0);
-    for(int i=0;i < load_cnt;i++){
-        if(return_address==load_points[i])return;
+    for(int i=0;i < 2*cnt;i++){
+        if(return_address==sche_points[i])return;
     }
-    load_points[store_cnt++] = (u64)return_address;
+    sche_points[2*cnt] = return_address;
+    sche_points[2*cnt+1] = 0;
+    cnt++;
     return;
 }
 

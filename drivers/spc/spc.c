@@ -24,6 +24,7 @@ typedef struct point {
 Point *sche_points = NULL;
 u64 cnt = 0;
 int trust_val;
+spinlock_t record_lock;
 
 __attribute__((__noinline__)) void step_hint(void)
 {
@@ -52,14 +53,12 @@ void test_kasan(void)
 	ptr[0] = 0xdeadbeef;
 }
 
-SYSCALL_DEFINE3(schedule_info, unsigned int, cmd, u64 *, buf, int, pre_val)
+SYSCALL_DEFINE3(schedule_info, unsigned int, cmd, u64 __user *, buf, int, pre_val)
 {
 	switch (cmd) {
 	case CMD_START_RECORD:
 		if (sche_points == NULL) {
-			sche_points =
-				kmalloc(MaxSyscallPointSize * sizeof(Point),
-					GFP_KERNEL);
+			sche_points = kmalloc_array(MaxSyscallPointSize,sizeof(Point),GFP_KERNEL);
 			if (!sche_points) {
 				return -ENOMEM;
 			}
@@ -106,13 +105,24 @@ SYSCALL_DEFINE3(schedule_info, unsigned int, cmd, u64 *, buf, int, pre_val)
 
 u64 getCtx(void)
 {
-	char traceBuf[traceLen];
-	unsigned long stack_entries[NUM_STACK_ENTRIES] = { 0 };
+	char *traceBuf = kmalloc(traceLen, GFP_KERNEL);
+	unsigned long *stack_entries = kmalloc_array(NUM_STACK_ENTRIES, sizeof(unsigned long), GFP_KERNEL);
+
+    if (!traceBuf || !stack_entries) {
+		kfree(traceBuf);
+		kfree(stack_entries);
+		return 0;
+	}
+
 	int num_stack_entries =
 		stack_trace_save(stack_entries, NUM_STACK_ENTRIES, 0);
 	stack_trace_snprint(traceBuf, traceLen, stack_entries,
 			    NUM_STACK_ENTRIES, 0);
 	u64 hash_val = xxh64(traceBuf, traceLen, 0);
+
+    kfree(traceBuf);
+	kfree(stack_entries);
+
 	return hash_val;
 }
 
@@ -123,6 +133,9 @@ void store_record(void)
 	}
 	if (sche_points == NULL)
 		return;
+
+    spin_lock(&record_lock);
+
 	if (cnt >= MaxSyscallPointSize) {
 		return;
 	}
@@ -130,15 +143,19 @@ void store_record(void)
 	void *return_address = __builtin_return_address(0);
 	u64 ctx = getCtx();
 	for (int i = 0; i < cnt; i++) {
-		if (ctx == sche_points[i].ctx &&
-		    return_address == sche_points[i].addr)
+		if (return_address == sche_points[i].addr){
+            spin_unlock(&record_lock);
 			return;
+        }
 	}
 	tmp.addr = (u64)return_address;
 	tmp.type = 1;
 	tmp.ctx = ctx;
 	memcpy(&sche_points[cnt], &tmp, sizeof(Point));
 	cnt++;
+
+    spin_unlock(&record_lock);
+
 	return;
 }
 
@@ -149,6 +166,9 @@ void load_record(void)
 	}
 	if (sche_points == NULL)
 		return;
+
+    spin_lock(&record_lock);
+
 	if (cnt >= MaxSyscallPointSize) {
 		return;
 	}
@@ -157,13 +177,18 @@ void load_record(void)
 	u64 ctx = getCtx();
 	for (int i = 0; i < cnt; i++) {
 		if (ctx == sche_points[i].ctx &&
-		    return_address == sche_points[i].addr)
+		    return_address == sche_points[i].addr){
+            spin_unlock(&record_lock);
 			return;
+        }
 	}
 	tmp.addr = (u64)return_address;
 	tmp.type = 0;
 	tmp.ctx = ctx;
 	memcpy(&sche_points[cnt], &tmp, sizeof(Point));
 	cnt++;
+
+    spin_unlock(&record_lock);
+
 	return;
 }

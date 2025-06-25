@@ -2676,6 +2676,8 @@ pid_t kernel_clone(struct kernel_clone_args *args)
 	if (IS_ERR(p))
 		return PTR_ERR(p);
 
+	p->current_syscall_nr=0xffff;
+
 	/*
 	 * Do this prior waking up the new thread - the thread pointer
 	 * might get invalid after that point, if the thread exits quickly.

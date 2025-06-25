@@ -3,6 +3,7 @@
 #include <linux/syscalls.h>
 #include <linux/printk.h>
 #include <linux/xxhash.h>
+#include <linux/sched/signal.h> 
 #include <linux/spinlock.h>
 
 static DEFINE_SPINLOCK(record_lock);
@@ -13,6 +14,7 @@ static DEFINE_SPINLOCK(record_lock);
 #define CMD_HINT_ADDR 0x4
 #define CMD_TEST 0x5
 #define CMD_GET_RECORD 0x1234
+#define CMD_CLEAR_TASK 0x3333
 #define MaxSyscallPointSize 200
 #define magic 0xffff
 #define NUM_STACK_ENTRIES 64
@@ -27,6 +29,9 @@ typedef struct point {
 Point *sche_points = NULL;
 u64 cnt = 0;
 int trust_val;
+unsigned long flags;
+
+struct task_struct *task;
 
 __attribute__((__noinline__)) void step_hint(void)
 {
@@ -46,6 +51,14 @@ void trampoline_entry(void)
 	while (1) {
 		trampoline_exit();
 	}
+}
+
+void clear_task(void){
+	for_each_process(task){
+		task->current_syscall_nr = magic;
+	}
+	cnt=0;
+	sche_points = NULL;
 }
 
 void test_kasan(void)
@@ -86,17 +99,18 @@ SYSCALL_DEFINE3(schedule_info, unsigned int, cmd, u64 __user *, buf, int, pre_va
 		break;
 	case CMD_GET_RECORD:
 		if (sche_points != NULL) {
-			spin_lock(&record_lock);
+			// add spinlock would cause bug
 			if (copy_to_user(buf, sche_points, cnt * sizeof(Point))){
-				spin_unlock(&record_lock);
 				return -EFAULT;
 			}
 			printk(KERN_INFO "Returning recorded data\n");
-			spin_unlock(&record_lock);
 			return cnt;
 		} else {
 			printk(KERN_INFO "No data to return\n");
 		}
+		break;
+	case CMD_CLEAR_TASK:
+		clear_task();
 		break;
 	case CMD_HINT_ADDR:
 		step_hint();
@@ -112,8 +126,8 @@ SYSCALL_DEFINE3(schedule_info, unsigned int, cmd, u64 __user *, buf, int, pre_va
 
 u64 getCtx(void)
 {
-	char *traceBuf = kmalloc(traceLen, GFP_KERNEL);
-	unsigned long *stack_entries = kmalloc_array(NUM_STACK_ENTRIES, sizeof(unsigned long), GFP_KERNEL);
+	char *traceBuf = kmalloc(traceLen, GFP_ATOMIC);
+	unsigned long *stack_entries = kmalloc_array(NUM_STACK_ENTRIES, sizeof(unsigned long), GFP_ATOMIC);
 
     if (!traceBuf || !stack_entries) {
 		kfree(traceBuf);
@@ -135,16 +149,19 @@ u64 getCtx(void)
 
 void store_record(void)
 {
+	if (in_interrupt())
+		return;
+
 	if (current->current_syscall_nr != trust_val) {
 		return;
 	}
 	if (sche_points == NULL)
 		return;
 
-    spin_lock(&record_lock);
+    spin_lock_irqsave(&record_lock,flags);
 
 	if (cnt >= MaxSyscallPointSize) {
-		spin_unlock(&record_lock);
+		spin_unlock_irqrestore(&record_lock,flags);
 		return;
 	}
 	Point tmp = {};
@@ -152,7 +169,7 @@ void store_record(void)
 	u64 ctx = getCtx();
 	for (int i = 0; i < cnt; i++) {
 		if (return_address == sche_points[i].addr){
-            spin_unlock(&record_lock);
+            spin_unlock_irqrestore(&record_lock,flags);
 			return;
         }
 	}
@@ -162,23 +179,26 @@ void store_record(void)
 	memcpy(&sche_points[cnt], &tmp, sizeof(Point));
 	cnt++;
 
-    spin_unlock(&record_lock);
+    spin_unlock_irqrestore(&record_lock,flags);
 
 	return;
 }
 
 void load_record(void)
 {
+	if (in_interrupt())
+		return;
+
 	if (current->current_syscall_nr != trust_val) {
 		return;
 	}
 	if (sche_points == NULL)
 		return;
 
-    spin_lock(&record_lock);
+    spin_lock_irqsave(&record_lock,flags);
 
 	if (cnt >= MaxSyscallPointSize) {
-		spin_unlock(&record_lock);
+		spin_unlock_irqrestore(&record_lock,flags);
 		return;
 	}
 	Point tmp = {};
@@ -187,7 +207,7 @@ void load_record(void)
 	for (int i = 0; i < cnt; i++) {
 		if (ctx == sche_points[i].ctx &&
 		    return_address == sche_points[i].addr){
-            spin_unlock(&record_lock);
+            spin_unlock_irqrestore(&record_lock,flags);
 			return;
         }
 	}
@@ -197,7 +217,7 @@ void load_record(void)
 	memcpy(&sche_points[cnt], &tmp, sizeof(Point));
 	cnt++;
 
-    spin_unlock(&record_lock);
+    spin_unlock_irqrestore(&record_lock,flags);
 
 	return;
 }

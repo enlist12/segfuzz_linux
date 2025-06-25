@@ -3,6 +3,9 @@
 #include <linux/syscalls.h>
 #include <linux/printk.h>
 #include <linux/xxhash.h>
+#include <linux/spinlock.h>
+
+static DEFINE_SPINLOCK(record_lock);
 
 #define CMD_START_RECORD 0x1
 #define CMD_STOP_RECORD 0x2
@@ -24,7 +27,6 @@ typedef struct point {
 Point *sche_points = NULL;
 u64 cnt = 0;
 int trust_val;
-spinlock_t record_lock;
 
 __attribute__((__noinline__)) void step_hint(void)
 {
@@ -75,7 +77,7 @@ SYSCALL_DEFINE3(schedule_info, unsigned int, cmd, u64 __user *, buf, int, pre_va
 			kfree(sche_points);
 			sche_points = NULL;
 			trust_val = 0;
-			current->current_syscall_nr = 0xffff;
+			current->current_syscall_nr = magic;
 			cnt = 0;
 			printk(KERN_INFO "Recording stopped\n");
 		} else {
@@ -84,9 +86,13 @@ SYSCALL_DEFINE3(schedule_info, unsigned int, cmd, u64 __user *, buf, int, pre_va
 		break;
 	case CMD_GET_RECORD:
 		if (sche_points != NULL) {
-			if (copy_to_user(buf, sche_points, cnt * sizeof(Point)))
+			spin_lock(&record_lock);
+			if (copy_to_user(buf, sche_points, cnt * sizeof(Point))){
+				spin_unlock(&record_lock);
 				return -EFAULT;
+			}
 			printk(KERN_INFO "Returning recorded data\n");
+			spin_unlock(&record_lock);
 			return cnt;
 		} else {
 			printk(KERN_INFO "No data to return\n");
@@ -97,6 +103,7 @@ SYSCALL_DEFINE3(schedule_info, unsigned int, cmd, u64 __user *, buf, int, pre_va
 		break;
 	case CMD_TEST:
 		test_kasan();
+		break;
 	default:
 		return -EINVAL;
 	}
@@ -137,6 +144,7 @@ void store_record(void)
     spin_lock(&record_lock);
 
 	if (cnt >= MaxSyscallPointSize) {
+		spin_unlock(&record_lock);
 		return;
 	}
 	Point tmp = {};
@@ -170,6 +178,7 @@ void load_record(void)
     spin_lock(&record_lock);
 
 	if (cnt >= MaxSyscallPointSize) {
+		spin_unlock(&record_lock);
 		return;
 	}
 	Point tmp = {};

@@ -36,7 +36,7 @@ struct task_struct *task;
 __attribute__((__noinline__)) void step_hint(void)
 {
 	//pr_info("I am used to be vm hint addr\n");
-	return;
+	asm volatile("nop");
 }
 
 // Server for hypercall
